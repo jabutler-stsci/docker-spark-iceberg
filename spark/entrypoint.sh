@@ -21,6 +21,7 @@ start-master.sh -p 7077
 start-worker.sh spark://spark-iceberg:7077
 
 start-history-server.sh
+spark-sql -e 'CREATE NAMESPACE IF NOT EXISTS demo.default;' || exit 1
 start-thriftserver.sh  --driver-java-options "-Dderby.system.home=/tmp/derby"
 
 # Entrypoint, for example notebook, pyspark or spark-sql
