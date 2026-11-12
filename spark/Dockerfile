@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 # syntax=docker/dockerfile:1
-FROM python:3.10-bullseye
+FROM python:3.14-bookworm
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -31,48 +31,73 @@ RUN apt-get update && \
 
 # Install Jupyter and other python deps
 COPY requirements.txt .
-RUN pip3 install -r requirements.txt
-
-# Add scala kernel via spylon-kernel
-RUN python3 -m spylon_kernel install
+RUN pip3 install --only-binary=pyiceberg,pyarrow,numpy,pandas,scipy,matplotlib,grpcio -r requirements.txt
 
 # Optional env variables
-ENV SPARK_HOME=${SPARK_HOME:-"/opt/spark"}
-ENV PYTHONPATH=$SPARK_HOME/python:$SPARK_HOME/python/lib/py4j-0.10.9.7-src.zip:$PYTHONPATH
+ENV SPARK_HOME=/opt/spark
+ENV PYTHONPATH=$SPARK_HOME/python:$SPARK_HOME/python/lib/py4j-src.zip
 
 WORKDIR ${SPARK_HOME}
 
-ENV SPARK_VERSION=3.5.6
-ENV SPARK_MAJOR_VERSION=3.5
-ENV ICEBERG_VERSION=1.9.0
+ENV SPARK_VERSION=4.1.4
+ENV SPARK_SHA512=1461b6c425d290913e7be97bfec738abc843c663d177dc57e32b82874d20144ed67dcca692a57efc4e5b40d2f001ee0e9e0d2d7b088ae58f5378ecac92739076
+ENV SPARK_MAJOR_VERSION=4.1
+ENV SCALA_BINARY_VERSION=2.13
+ENV ICEBERG_VERSION=1.12.0
 
 # Download spark
 RUN mkdir -p ${SPARK_HOME} \
- && curl -L "https://www.apache.org/dyn/closer.lua/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz?action=download" -o spark-${SPARK_VERSION}-bin-hadoop3.tgz \
+ && curl -fL "https://dlcdn.apache.org/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz" -o spark-${SPARK_VERSION}-bin-hadoop3.tgz \
+ && echo "${SPARK_SHA512}  spark-${SPARK_VERSION}-bin-hadoop3.tgz" | sha512sum -c - \
  && tar xvzf spark-${SPARK_VERSION}-bin-hadoop3.tgz --directory /opt/spark --strip-components 1 \
- && rm -rf spark-${SPARK_VERSION}-bin-hadoop3.tgz
+ && ln -s "$(basename "$(find "${SPARK_HOME}/python/lib" -name 'py4j-*-src.zip' -print -quit)")" "${SPARK_HOME}/python/lib/py4j-src.zip" \
+ && rm -f spark-${SPARK_VERSION}-bin-hadoop3.tgz
 
 # Download iceberg spark runtime
-RUN curl https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-${SPARK_MAJOR_VERSION}_2.12/${ICEBERG_VERSION}/iceberg-spark-runtime-${SPARK_MAJOR_VERSION}_2.12-${ICEBERG_VERSION}.jar -Lo /opt/spark/jars/iceberg-spark-runtime-${SPARK_MAJOR_VERSION}_2.12-${ICEBERG_VERSION}.jar
+RUN curl -fL https://repo.maven.apache.org/maven2/org/apache/iceberg/iceberg-spark-runtime-${SPARK_MAJOR_VERSION}_${SCALA_BINARY_VERSION}/${ICEBERG_VERSION}/iceberg-spark-runtime-${SPARK_MAJOR_VERSION}_${SCALA_BINARY_VERSION}-${ICEBERG_VERSION}.jar -o /opt/spark/jars/iceberg-spark-runtime-${SPARK_MAJOR_VERSION}_${SCALA_BINARY_VERSION}-${ICEBERG_VERSION}.jar \
+ && unzip -t /opt/spark/jars/iceberg-spark-runtime-${SPARK_MAJOR_VERSION}_${SCALA_BINARY_VERSION}-${ICEBERG_VERSION}.jar > /dev/null
 
 # Download AWS bundle
-RUN curl -s https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/${ICEBERG_VERSION}/iceberg-aws-bundle-${ICEBERG_VERSION}.jar -Lo /opt/spark/jars/iceberg-aws-bundle-${ICEBERG_VERSION}.jar
+RUN curl -fL https://repo.maven.apache.org/maven2/org/apache/iceberg/iceberg-aws-bundle/${ICEBERG_VERSION}/iceberg-aws-bundle-${ICEBERG_VERSION}.jar -o /opt/spark/jars/iceberg-aws-bundle-${ICEBERG_VERSION}.jar \
+ && unzip -t /opt/spark/jars/iceberg-aws-bundle-${ICEBERG_VERSION}.jar > /dev/null
 
 # Download GCP bundle
-RUN curl -s https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-gcp-bundle/${ICEBERG_VERSION}/iceberg-gcp-bundle-${ICEBERG_VERSION}.jar -Lo /opt/spark/jars/iceberg-gcp-bundle-${ICEBERG_VERSION}.jar
+RUN curl -fL https://repo.maven.apache.org/maven2/org/apache/iceberg/iceberg-gcp-bundle/${ICEBERG_VERSION}/iceberg-gcp-bundle-${ICEBERG_VERSION}.jar -o /opt/spark/jars/iceberg-gcp-bundle-${ICEBERG_VERSION}.jar \
+ && unzip -t /opt/spark/jars/iceberg-gcp-bundle-${ICEBERG_VERSION}.jar > /dev/null
 
 # Download Azure bundle
-RUN curl -s https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-azure-bundle/${ICEBERG_VERSION}/iceberg-azure-bundle-${ICEBERG_VERSION}.jar -Lo /opt/spark/jars/iceberg-azure-bundle-${ICEBERG_VERSION}.jar
+RUN curl -fL https://repo.maven.apache.org/maven2/org/apache/iceberg/iceberg-azure-bundle/${ICEBERG_VERSION}/iceberg-azure-bundle-${ICEBERG_VERSION}.jar -o /opt/spark/jars/iceberg-azure-bundle-${ICEBERG_VERSION}.jar \
+ && unzip -t /opt/spark/jars/iceberg-azure-bundle-${ICEBERG_VERSION}.jar > /dev/null
 
 # Install AWS CLI
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
+ARG TARGETARCH
+ENV ALMOND_VERSION=0.15.0
+ENV SCALA_VERSION=2.13.17
+ENV COURSIER_REPOSITORIES=https://repo.maven.apache.org/maven2
+COPY scala/ ${SPARK_HOME}/notebook_kernel/
+RUN case "${TARGETARCH}" in arm64) CS_ARCH=aarch64 ;; amd64) CS_ARCH=x86_64 ;; *) exit 1 ;; esac \
+ && curl -fL "https://github.com/coursier/coursier/releases/download/v2.1.25/cs-${CS_ARCH}-pc-linux.gz" -o /tmp/cs.gz \
+ && gzip -d /tmp/cs.gz \
+ && chmod +x /tmp/cs /opt/spark/notebook_kernel/kernel.sh \
+ && /tmp/cs bootstrap --standalone almond:${ALMOND_VERSION} --scala ${SCALA_VERSION} \
+   --force-version org.scala-lang:scala-library:${SCALA_VERSION} \
+   --force-version org.scala-lang:scala-compiler:${SCALA_VERSION} \
+   --force-version org.scala-lang:scala-reflect:${SCALA_VERSION} \
+   -o /opt/scala-kernel \
+ && /opt/scala-kernel --install --id scala --display-name 'Scala (Spark)' \
+  --jupyter-path /usr/local/share/jupyter/kernels --command /opt/spark/notebook_kernel/kernel.sh \
+ && rm /tmp/cs
+
+RUN case "${TARGETARCH}" in arm64) AWS_ARCH=aarch64 ;; amd64) AWS_ARCH=x86_64 ;; *) exit 1 ;; esac \
+ && curl -fL "https://awscli.amazonaws.com/awscli-exe-linux-${AWS_ARCH}.zip" -o "awscliv2.zip" \
  && unzip awscliv2.zip \
  && sudo ./aws/install \
  && rm awscliv2.zip \
  && rm -rf aws/
 
 RUN mkdir -p /home/iceberg/data \
- && curl https://data.cityofnewyork.us/resource/tg4x-b46p.json > /home/iceberg/data/nyc_film_permits.json \
+ && curl -fL --retry 5 --retry-all-errors --max-time 120 'https://data.cityofnewyork.us/resource/tg4x-b46p.json?$limit=1000' -o /home/iceberg/data/nyc_film_permits.json \
+ && python3 -c 'import json; data=json.load(open("/home/iceberg/data/nyc_film_permits.json")); assert isinstance(data, list) and data and all("borough" in row for row in data)' \
  && curl https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2022-04.parquet -o /home/iceberg/data/yellow_tripdata_2022-04.parquet \
  && curl https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2022-03.parquet -o /home/iceberg/data/yellow_tripdata_2022-03.parquet \
  && curl https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2022-02.parquet -o /home/iceberg/data/yellow_tripdata_2022-02.parquet \
