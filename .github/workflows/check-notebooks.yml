@@ -7,7 +7,15 @@ on:
 
 jobs:
   docker:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      COMPOSE_PROJECT_NAME: spark-upgrade-smoke
+      COMPOSE_FILE: docker-compose.yml:dev/compose-smoke.yml
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,16 +24,30 @@ jobs:
         run: pip3 install pre-commit && pre-commit run --all-files
 
       - name: Build container
-        run: docker compose pull && docker compose build && docker compose up -d
+        run: docker compose build && docker compose up -d --no-build
 
-      - name: Wait until the container is up
-        run: |
-          while ! nc -z localhost 8888; do
-            sleep 1
-          done
-
-      - name: Install papermill
-        run: docker exec $(docker ps -q --filter expose=8888) pip3 install papermill
+      - name: Smoke tests
+        run: bash dev/smoke-test.sh smoke
 
       - name: Run notebooks
-        run: ls spark/notebooks | xargs -I {} docker exec $(docker ps -q --filter expose=8888) papermill "/home/iceberg/notebooks/{}"
+        if: matrix.runner == 'ubuntu-latest'
+        run: bash dev/smoke-test.sh notebooks
+
+      - name: Collect test results
+        if: always()
+        run: |
+          mkdir -p test-results
+          docker compose logs --no-color > test-results/compose.log 2>&1
+          docker compose cp spark-iceberg:/tmp/test-results/. test-results/notebooks || true
+          docker compose cp spark-iceberg:/opt/spark/logs/. test-results/spark-logs || true
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.runner }}
+          path: test-results/
+
+      - name: Stop test stack
+        if: always()
+        run: docker compose down --volumes

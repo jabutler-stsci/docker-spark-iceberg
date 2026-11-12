@@ -23,6 +23,7 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        exclude: ^dev/compose-smoke\.yml$
   - repo: https://github.com/kynan/nbstripout
     rev: 0.6.1
     hooks:

@@ -1,0 +1,14 @@
+services:
+  spark-iceberg:
+    image: spark-iceberg:upgrade-test
+    container_name: !reset null
+    ports: !reset []
+    volumes: !reset []
+  rest:
+    container_name: !reset null
+    ports: !reset []
+  minio:
+    container_name: !reset null
+    ports: !reset []
+  mc:
+    container_name: !reset null
