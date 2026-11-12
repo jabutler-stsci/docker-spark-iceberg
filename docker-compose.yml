@@ -38,7 +38,7 @@ services:
       - 10000:10000
       - 10001:10001
   rest:
-    image: apache/iceberg-rest-fixture
+    image: apache/iceberg-rest-fixture@sha256:009f9f6897cc1e8fd6e8133c401c7a3e7c333c71293a621d06a71570ae989c29
     container_name: iceberg-rest
     networks:
       iceberg_net:
@@ -52,7 +52,7 @@ services:
       - CATALOG_IO__IMPL=org.apache.iceberg.aws.s3.S3FileIO
       - CATALOG_S3_ENDPOINT=http://minio:9000
   minio:
-    image: minio/minio
+    image: cgr.dev/chainguard/minio@sha256:3c60a2a8c4d33409a9bc7a623a7fcbfb4605adc3d89422d2f53b3f673a6e5597
     container_name: minio
     environment:
       - MINIO_ROOT_USER=admin
@@ -69,7 +69,7 @@ services:
   mc:
     depends_on:
       - minio
-    image: minio/mc
+    image: cgr.dev/chainguard/minio-client@sha256:39768db4c3fa811bc8f2e2a3e0add8ea391648b1c980de179985e1c353dc1805
     container_name: mc
     networks:
       iceberg_net:
